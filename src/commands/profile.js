@@ -6,7 +6,7 @@ import {
 // 전투 특성 뽑기
 const pickStat = (arr, key, d = 0) => Number(arr?.find?.(s => s?.Type === key)?.Value ?? d);
 
-// 보석 타입 분류: 겁화(=멸화), 작열(=홍염)
+// 보석 타입 분류: 겁화(=멸화), 작열(=홍염), 광휘
 const kindOfGem = (name = '') => {
   const n = String(name);
   if (/(멸화|겁화)/.test(n)) return '겁화';
@@ -15,7 +15,7 @@ const kindOfGem = (name = '') => {
   return '기타';
 };
 
-// ----- 장착 각인 파싱 (Effects 우선 → Engravings.Tooltip → ArkPassiveEffects) -----
+// ----- 장착 각인 파싱 -----
 function parseEquippedEngravings(e) {
   let found = [];
 
@@ -23,49 +23,37 @@ function parseEquippedEngravings(e) {
   const effects = e?.ArkPassiveEffects || [];
   for (const it of effects) {
     let name = it?.Name?.trim() || '';
-    if (name) {
-      name = name.replace(/\s*Lv\.\d+/, '').trim(); // "Lv.x" 제거
-      found.push(name);
+    if (!name) continue;
+    let level = Number(it?.AbilityStoneLevel ?? 0) || Number(it?.Level ?? 0) || 0;
+
+    // Description에서 레벨 찾기
+    if (!level) {
+      const desc = String(it?.Description || '');
+      const m = desc.match(/활성\s*레벨\s*(\d)|Lv\.?\s*(\d)|레벨\s*(\d)/i);
+      level = m ? Number(m[1] || m[2] || m[3]) || 0 : 0;
     }
+    found.push({ name, level });
   }
 
   // 2) Effects가 비면 Engravings[].Tooltip 참고
-  if (found.length === 0 && Array.isArray(e?.Engravings) && e.Engravings.length) {
+  if (found.length === 0 && Array.isArray(e?.Engravings)) {
     for (const it of e.Engravings) {
-      let name = String(it?.Name || '').trim();
+      const name = String(it?.Name || '').trim();
       if (!name) continue;
-      name = name.replace(/\s*Lv\.\d+/, '').trim();
-      found.push(name);
-    }
-  }
-
-  // 중복 제거 + 이름순 정렬
-  const unique = [...new Set(found)];
-  return unique.sort((a, b) => a.localeCompare(b));
-}
-
-
-  // 3) 최신 응답: ArkPassiveEffects에 각인이 들어오는 경우 (지금 네 케이스)
-  if (found.length === 0 && Array.isArray(e?.ArkPassiveEffects) && e.ArkPassiveEffects.length) {
-    for (const it of e.ArkPassiveEffects) {
-      const name = String(it?.Name || '').trim(); // 예: "아드레날린", "예리한 둔기"
-      if (!name) continue;
-      // 레벨 후보: AbilityStoneLevel > Level > Description 파싱
-      let level = Number(it?.AbilityStoneLevel ?? 0) || Number(it?.Level ?? 0) || 0;
-      if (!level) {
-        const desc = String(it?.Description || '');
-        const m = desc.match(/활성\s*레벨\s*(\d)|Lv\.?\s*(\d)|레벨\s*(\d)/i);
-        level = m ? Number(m[1] || m[2] || m[3]) || 0 : 0;
-      }
+      const tip = String(it?.Tooltip || '');
+      const m = tip.match(/활성\s*레벨\s*(\d)|Lv\.?\s*(\d)|레벨\s*(\d)/i);
+      const level = m ? Number(m[1] || m[2] || m[3]) || 0 : 0;
       found.push({ name, level });
     }
   }
 
-  // 4) 이름 기준 병합(최대 레벨), 정렬: 레벨 내림차순 → 이름 오름차순
+  // 이름 기준 병합 (최대 레벨)
   const byName = new Map();
   for (const { name, level } of found) {
     byName.set(name, Math.max(byName.get(name) || 0, level));
   }
+
+  // 정렬: 레벨 내림차순 → 이름 오름차순
   return [...byName.entries()]
     .map(([name, level]) => ({ name, level }))
     .sort((a, b) => (b.level - a.level) || a.name.localeCompare(b.name, 'ko'));
@@ -110,8 +98,6 @@ export async function execute(interaction) {
       getGems(name),
       getCards(name),
     ]);
-    console.log('[DEBUG ENGRAVINGS]', JSON.stringify(e).slice(0, 500));
-
 
     // 기본 정보
     const cls = p?.CharacterClassName || 'Unknown';
@@ -128,15 +114,16 @@ export async function execute(interaction) {
     const end = pickStat(stats, '인내');
     const exp = pickStat(stats, '숙련');
 
-    // 장착 각인(전부)
+    // 장착 각인
     const equippedEng = parseEquippedEngravings(e);
-    const engrItems = equippedEng.map(x => `• ${x.name}${x.level ? ` Lv.${x.level}` : ''}`.trim());
-    const engrText = engrItems.length ? engrItems.join('\n') : '-';
+    const engrText = equippedEng.length// 변경 (이름만)
+    ? equippedEng.map(x => `• ${x.name}`).join('\n')
+    : '-';
 
-    // 보석 상세(요약 없이, 레벨×타입 집계)
+    // 보석 상세
     const gemList = Array.isArray(g?.Gems) && g.Gems.length ? g.Gems :
                     (Array.isArray(g?.gems) ? g.gems : []);
-    const countsByLvl = new Map(); // level -> { 겁화, 작열, 광휘, 기타, total }
+    const countsByLvl = new Map();
     for (const x of gemList) {
       const lvl = Number(x?.Level || 0);
       if (!lvl) continue;
@@ -146,14 +133,12 @@ export async function execute(interaction) {
       bucket.total += 1;
       countsByLvl.set(lvl, bucket);
     }
-
-const gemDetailLines = [...countsByLvl.entries()]
-  .sort((a, b) => b[0] - a[0])
-  .map(([lvl, c]) =>
-    `Lv${lvl}: 겁화 ${c.겁화 || 0} · 작열 ${c.작열 || 0} · 광휘 ${c.광휘 || 0}${c.기타 ? ` · 기타 ${c.기타}` : ''}`
-  );
-const gemDetail = gemDetailLines.length ? gemDetailLines.join('\n') : '-';
-
+    const gemDetailLines = [...countsByLvl.entries()]
+      .sort((a, b) => b[0] - a[0])
+      .map(([lvl, c]) =>
+        `Lv${lvl}: 겁화 ${c.겁화 || 0} · 작열 ${c.작열 || 0} · 광휘 ${c.광휘 || 0}${c.기타 ? ` · 기타 ${c.기타}` : ''}`
+      );
+    const gemDetail = gemDetailLines.length ? gemDetailLines.join('\n') : '-';
 
     // 카드
     const cards = Array.isArray(c?.Cards) ? c.Cards : [];
@@ -166,7 +151,7 @@ const gemDetail = gemDetailLines.length ? gemDetailLines.join('\n') : '-';
       .setDescription(`서버: **${server}**\n아이템 레벨: **${ilvl.toFixed(2)}**  |  원정대 레벨: **${expLv}**`)
       .addFields(
         { name: '전투 특성', value: `치명 **${crit}** · 특화 **${spec}** · 신속 **${swift}**\n제압 **${dom}** · 인내 **${end}** · 숙련 **${exp}**` },
-        ...splitToEmbedFields('장착 각인', engrText),  // 전부 표기(길면 자동 분할)
+        ...splitToEmbedFields('장착 각인', engrText),
         { name: '보석 상세', value: gemDetail, inline: false },
         { name: '카드', value: `${setName} / 각성 합 ${awakeningSum}`, inline: false },
       )
