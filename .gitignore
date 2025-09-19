@@ -1,0 +1,16 @@
+# deps
+node_modules/
+
+# env / secrets
+.env
+.env.*.local
+
+# editor/OS
+.vscode/
+.DS_Store
+
+# logs
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
