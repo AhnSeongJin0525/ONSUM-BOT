@@ -17,30 +17,33 @@ const kindOfGem = (name = '') => {
 
 // ----- 장착 각인 파싱 (Effects 우선 → Engravings.Tooltip → ArkPassiveEffects) -----
 function parseEquippedEngravings(e) {
-  const found = []; // { name, level }
+  let found = [];
 
-  // 1) Effects: "원한 Lv.3" 같이 확정적으로 내려오면 이걸 최우선 사용
-  if (Array.isArray(e?.Effects) && e.Effects.length) {
-    for (const eff of e.Effects) {
-      const raw = String(eff?.Name || '').trim();
-      if (!raw) continue;
-      const m = raw.match(/^(.*?)[\s]*Lv\.?\s*(\d+)/i);
-      if (m) found.push({ name: m[1].trim(), level: Number(m[2]) || 0 });
-      else    found.push({ name: raw, level: 0 });
+  // 1) ArkPassiveEffects 우선
+  const effects = e?.ArkPassiveEffects || [];
+  for (const it of effects) {
+    let name = it?.Name?.trim() || '';
+    if (name) {
+      name = name.replace(/\s*Lv\.\d+/, '').trim(); // "Lv.x" 제거
+      found.push(name);
     }
   }
 
-  // 2) Effects가 비면 Engravings[].Tooltip에서 레벨 추출
+  // 2) Effects가 비면 Engravings[].Tooltip 참고
   if (found.length === 0 && Array.isArray(e?.Engravings) && e.Engravings.length) {
     for (const it of e.Engravings) {
-      const name = String(it?.Name || '').trim();
+      let name = String(it?.Name || '').trim();
       if (!name) continue;
-      const tip = String(it?.Tooltip || '');
-      const m = tip.match(/활성\s*레벨\s*(\d)|Lv\.?\s*(\d)|레벨\s*(\d)/i);
-      const level = m ? Number(m[1] || m[2] || m[3]) || 0 : 0;
-      found.push({ name, level });
+      name = name.replace(/\s*Lv\.\d+/, '').trim();
+      found.push(name);
     }
   }
+
+  // 중복 제거 + 이름순 정렬
+  const unique = [...new Set(found)];
+  return unique.sort((a, b) => a.localeCompare(b));
+}
+
 
   // 3) 최신 응답: ArkPassiveEffects에 각인이 들어오는 경우 (지금 네 케이스)
   if (found.length === 0 && Array.isArray(e?.ArkPassiveEffects) && e.ArkPassiveEffects.length) {
